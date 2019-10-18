@@ -1,0 +1,178 @@
+--- z80adr.c.orig	2014-10-24 03:21:10.000000000 +1100
++++ z80adr.c	2019-08-14 21:42:45.796828048 +1000
+@@ -25,6 +25,8 @@
+ #include "asxxxx.h"
+ #include "z80.h"
+ 
++extern int mchtyp;
++
+ /*
+  * Read an address specifier. Pack the
+  * address information into the supplied
+@@ -55,6 +57,8 @@
+ 			mode = S_INDB;
+ 		} else
+ 		if ((indx = admode(R16)) != 0) {
++			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++				aerr();
+ 			mode = S_INDR;
+ 		} else	
+ 		if ((indx = admode(R8X)) != 0) {
+@@ -88,12 +92,18 @@
+ 			mode = S_R8;
+ 		} else
+ 		if ((indx = admode(R16)) != 0) {
++			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++				aerr();
+ 			mode = S_R16;
+ 		} else	
+ 		if ((indx = admode(R8X)) != 0) {
++			if (mchtyp == X_8080)
++				aerr();
+ 			mode = S_R8X;
+ 		} else
+ 		if ((indx = admode(R16X)) != 0) {
++			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++				aerr();
+ 			mode = S_R16X;
+ 		} else {
+ 			mode = S_USER;
+@@ -107,7 +117,7 @@
+ 		}
+ 		if ((c = getnb()) == LFIND) {
+ 			if ((indx=admode(R16))!=0
+-				&& ((indx&0xFF)==IX || (indx&0xFF)==IY)) {
++                                && mchtyp != X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY)) {
+ 				esp->e_mode = S_INDR + (indx&0xFF);
+ 			} else {
+ 				aerr();
+--- z80.h.orig	2019-08-14 21:42:45.796828048 +1000
++++ z80.h	2019-08-14 21:43:42.634876002 +1000
+@@ -147,6 +147,7 @@
+  */
+ #define	X_Z80	0
+ #define	X_HD64	1
++#define	X_8080	2
+ 
+ /*
+  * HD64180 Instructions
+--- z80mch.c.orig	2014-10-24 03:21:10.000000000 +1100
++++ z80mch.c	2019-08-14 21:42:45.796828048 +1000
+@@ -382,10 +382,14 @@
+ 	switch (rf) {
+ 
+ 	case S_INH1:
++		if (mchtyp == X_8080 && op == 0xD9)	/* EXX */
++			aerr();
+ 		outab(op);
+ 		break;
+ 
+ 	case S_INH2:
++		if (mchtyp == X_8080)
++			aerr();
+ 		outab(0xED);
+ 		outab(op);
+ 		break;
+@@ -408,6 +412,8 @@
+ 			break;
+ 		} else
+ 		if ((v1 = admode(R16)) != 0 && (v1 &= 0xFF) != SP) {
++			if (mchtyp == X_8080 && (v1 == IX || v1 == IY))
++				aerr();
+ 			if (v1 != gixiy(v1)) {
+ 				outab(op+0x20);
+ 				break;
+@@ -428,6 +434,8 @@
+ 		break;
+ 
+ 	case S_IM:
++		if (mchtyp == X_8080)
++			aerr();
+ 		expr(&e1, 0);
+ 		abscheck(&e1);
+ 		if (e1.e_addr > 2) {
+@@ -520,8 +528,11 @@
+ 			v1 = (int) e1.e_addr;
+ 			v2 = (int) e2.e_addr;
+ 			if ((v1 == HL) && (v2 <= SP)) {
+-				if (rf != S_ADD)
++                                if (rf != S_ADD) {
++					if (mchtyp == X_8080)
++						aerr();
+ 					outab(0xED);
++				}
+ 				outab(op | (v2<<4));
+ 				break;
+ 			}
+@@ -575,6 +586,8 @@
+ 			if (gixiy(v1) == HL) {
+ 				outab(0x2A);
+ 			} else {
++				if (mchtyp == X_8080)
++					aerr();
+ 				outab(0xED);
+ 				outab(0x4B | (v1<<4));
+ 			}
+@@ -585,6 +598,8 @@
+ 			if (gixiy(v2) == HL) {
+ 				outab(0x22);
+ 			} else {
++				if (mchtyp == X_8080)
++					aerr();
+ 				outab(0xED);
+ 				outab(0x43 | (v2<<4));
+ 			}
+@@ -615,11 +630,15 @@
+ 			break;
+ 		}
+ 		if ((t1 == S_R8X) && (t2 == S_R8) && (v2 == A)) {
++			if (mchtyp == X_8080)
++				aerr();
+ 			outab(0xED);
+ 			outab(v1);
+ 			break;
+ 		}
+ 		if ((t1 == S_R8) && (v1 == A) && (t2 == S_R8X)) {
++			if (mchtyp == X_8080)
++				aerr();
+ 			outab(0xED);
+ 			outab(v2|0x10);
+ 			break;
+@@ -693,6 +712,8 @@
+ 				break;
+ 			}
+ 			if (t2 == S_IDC) {
++				if (mchtyp == X_8080)
++					aerr();
+ 				outab(0xED);
+ 				outab(((rf == S_IN) ? 0x40 : 0x41) + (v1<<3));
+ 				break;
+@@ -734,6 +755,9 @@
+ 
+ 	case S_DJNZ:
+ 	case S_JR:
++		if (mchtyp == X_8080)
++			aerr();
++		/* fall through */
+ 		if (rf == S_JR && (v1 = admode(CND)) != 0) {
+ 			if ((v1 &= 0xFF) <= 0x03) {
+ 				op += (v1+1)<<3;
+@@ -930,6 +954,8 @@
+ {
+ 	int t1;
+ 
++	if (pop && mchtyp == X_8080)
++		aerr();
+ 	if ((t1 = esp->e_mode) == S_R8) {
+ 		if (pop)
+ 			outab(pop);
+--- z80pst.c.orig	2019-08-14 21:42:45.796828048 +1000
++++ z80pst.c	2019-08-14 21:44:37.876978674 +1000
+@@ -227,6 +227,7 @@
+     {	NULL,	".z80",		S_CPU,		0,	X_Z80	},
+     {	NULL,	".hd64",	S_CPU,		0,	X_HD64	},
+     {	NULL,	".z180",	S_CPU,		0,	X_HD64	},
++    {	NULL,	".8080",	S_CPU,		0,	X_8080	},
+ 
+ 	/* z80 */
+ 
