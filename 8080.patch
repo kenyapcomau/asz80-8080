@@ -1,5 +1,5 @@
---- z80adr.c.orig	2014-10-24 03:21:10.000000000 +1100
-+++ z80adr.c	2019-08-14 21:42:45.796828048 +1000
+--- z80adr.c.orig	2021-01-12 23:15:12.971425032 +1100
++++ z80adr.c	2021-01-12 23:21:52.204201685 +1100
 @@ -25,6 +25,8 @@
  #include "asxxxx.h"
  #include "z80.h"
@@ -13,7 +13,7 @@
  			mode = S_INDB;
  		} else
  		if ((indx = admode(R16)) != 0) {
-+			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++			if ((mchtyp == X_8080 || mchtyp == X_8085) && ((indx&0xFF)==IX || (indx&0xFF)==IY))
 +				aerr();
  			mode = S_INDR;
  		} else	
@@ -22,17 +22,17 @@
  			mode = S_R8;
  		} else
  		if ((indx = admode(R16)) != 0) {
-+			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++			if ((mchtyp == X_8080 || mchtyp == X_8085) && ((indx&0xFF)==IX || (indx&0xFF)==IY))
 +				aerr();
  			mode = S_R16;
  		} else	
  		if ((indx = admode(R8X)) != 0) {
-+			if (mchtyp == X_8080)
++			if (mchtyp == X_8080 || mchtyp == X_8085)
 +				aerr();
  			mode = S_R8X;
  		} else
  		if ((indx = admode(R16X)) != 0) {
-+			if (mchtyp == X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY))
++			if ((mchtyp == X_8080 || mchtyp == X_8085) && ((indx&0xFF)==IX || (indx&0xFF)==IY))
 +				aerr();
  			mode = S_R16X;
  		} else {
@@ -42,33 +42,75 @@
  		if ((c = getnb()) == LFIND) {
  			if ((indx=admode(R16))!=0
 -				&& ((indx&0xFF)==IX || (indx&0xFF)==IY)) {
-+                                && mchtyp != X_8080 && ((indx&0xFF)==IX || (indx&0xFF)==IY)) {
++                                && mchtyp != X_8080 && mchtyp != X_8085  && ((indx&0xFF)==IX || (indx&0xFF)==IY)) {
  				esp->e_mode = S_INDR + (indx&0xFF);
  			} else {
  				aerr();
---- z80.h.orig	2019-08-14 21:42:45.796828048 +1000
-+++ z80.h	2019-08-14 21:43:42.634876002 +1000
-@@ -147,6 +147,7 @@
+@@ -227,5 +237,7 @@
+     {	"PE",	PE|0400	},
+     {	"P",	P |0400	},
+     {	"M",	M |0400	},
++    {   "NX5",  NX5 |0400 },
++    {   "X5",   X5 |0400 },
+     {	"",	0000	}
+ };
+--- z80.h.orig	2021-01-12 23:15:12.971425032 +1100
++++ z80.h	2021-01-12 23:26:22.514145382 +1100
+@@ -84,6 +84,8 @@
+ #define	PE	5
+ #define	P	6
+ #define	M	7
++#define	NX5	8
++#define	X5	9
+ 
+ /*
+  * Symbol types
+@@ -147,6 +149,8 @@
   */
  #define	X_Z80	0
  #define	X_HD64	1
 +#define	X_8080	2
++#define	X_8085	3
  
  /*
   * HD64180 Instructions
---- z80mch.c.orig	2014-10-24 03:21:10.000000000 +1100
-+++ z80mch.c	2019-08-14 21:42:45.796828048 +1000
+@@ -158,6 +162,14 @@
+ #define	X_TST	94
+ #define	X_TSTIO	95
+ 
++/*
++ * 8085 instructions
++ */
++#define	X_RIM	120
++#define	X_SIM	121
++/* Undocumented */
++#define	X_RSTV	122
++
+ struct adsym
+ {
+ 	char	a_str[4];	/* addressing string */
+--- z80mch.c.orig	2021-01-12 23:15:12.971425032 +1100
++++ z80mch.c	2021-01-12 23:52:43.676908526 +1100
+@@ -369,7 +369,7 @@
+ machine(mp)
+ struct mne *mp;
+ {
+-	int op, t1, t2;
++	int op, t1, t2, t3;
+ 	struct expr e1, e2;
+ 	int rf, v1, v2;
+ 
 @@ -382,10 +382,14 @@
  	switch (rf) {
  
  	case S_INH1:
-+		if (mchtyp == X_8080 && op == 0xD9)	/* EXX */
++		if ((mchtyp == X_8080 || mchtyp == X_8085) && op == 0xD9)	/* EXX */
 +			aerr();
  		outab(op);
  		break;
  
  	case S_INH2:
-+		if (mchtyp == X_8080)
++		if (mchtyp == X_8080 || mchtyp == X_8085)
 +			aerr();
  		outab(0xED);
  		outab(op);
@@ -77,7 +119,7 @@
  			break;
  		} else
  		if ((v1 = admode(R16)) != 0 && (v1 &= 0xFF) != SP) {
-+			if (mchtyp == X_8080 && (v1 == IX || v1 == IY))
++			if ((mchtyp == X_8080 || mchtyp == X_8085) && (v1 == IX || v1 == IY))
 +				aerr();
  			if (v1 != gixiy(v1)) {
  				outab(op+0x20);
@@ -86,93 +128,205 @@
  		break;
  
  	case S_IM:
-+		if (mchtyp == X_8080)
++		if (mchtyp == X_8080 || mchtyp == X_8085)
 +			aerr();
  		expr(&e1, 0);
  		abscheck(&e1);
  		if (e1.e_addr > 2) {
-@@ -520,8 +528,11 @@
+@@ -464,6 +472,18 @@
+ 			clrexpr(&e2);
+ 			t2 = addr(&e2);
+ 		}
++		/* Undocumented 8085 sra and rlc */
++		/* 0x28 is m_valu in op for sra */
++		/* 0x00 is m_valu in op for rlc */
++		if (mchtyp == X_8085 && t2 == S_R16) {
++ 			if (e2.e_addr == HL && op == 0x28)
++				outab(0x10);
++			else if (e2.e_addr == DE && op == 0x00)
++				outab(0x18);
++			else
++				aerr();
++			break;
++		}
+ 		if (genop(0xCB, op, &e2, 0) || t1)
+ 			aerr();
+ 		break;
+@@ -477,12 +497,21 @@
+ 		if (more()) {
+ 			if ((t2 != S_R8) || (e2.e_addr != A))
+ 				++t1;
++			/* Undocumented 8085 sub hl,bc */
++			if (mchtyp == X_8085 && op == S_SUB && t2 == S_R16 && e2.e_addr == BC)
++				++t1;
+ 			comma(1);
+ 			clrexpr(&e2);
+ 			t2 = addr(&e2);
+ 			if (t2 == S_USER)
+ 				t2 = e2.e_mode = S_IMMED;
+ 		}
++		/* Undocumented 8085 sub hl,bc */
++		if (t1 && mchtyp == X_8085 && t2 == S_R16 && e2.e_addr == BC) {
++			outab(0x08);
++			break;
++		}
++
+ 		if (genop(0, op, &e2, 1) || t1)
+ 			aerr();
+ 		break;
+@@ -520,8 +549,11 @@
  			v1 = (int) e1.e_addr;
  			v2 = (int) e2.e_addr;
  			if ((v1 == HL) && (v2 <= SP)) {
 -				if (rf != S_ADD)
 +                                if (rf != S_ADD) {
-+					if (mchtyp == X_8080)
++					if (mchtyp == X_8080 || mchtyp == X_8085)
 +						aerr();
  					outab(0xED);
 +				}
  				outab(op | (v2<<4));
  				break;
  			}
-@@ -575,6 +586,8 @@
+@@ -575,6 +607,8 @@
  			if (gixiy(v1) == HL) {
  				outab(0x2A);
  			} else {
-+				if (mchtyp == X_8080)
++				if (mchtyp == X_8080 || mchtyp == X_8085)
 +					aerr();
  				outab(0xED);
  				outab(0x4B | (v1<<4));
  			}
-@@ -585,6 +598,8 @@
+@@ -585,6 +619,8 @@
  			if (gixiy(v2) == HL) {
  				outab(0x22);
  			} else {
-+				if (mchtyp == X_8080)
++				if (mchtyp == X_8080 || mchtyp == X_8085)
 +					aerr();
  				outab(0xED);
  				outab(0x43 | (v2<<4));
  			}
-@@ -615,11 +630,15 @@
+@@ -615,11 +651,15 @@
  			break;
  		}
  		if ((t1 == S_R8X) && (t2 == S_R8) && (v2 == A)) {
-+			if (mchtyp == X_8080)
++			if (mchtyp == X_8080 || mchtyp == X_8085)
 +				aerr();
  			outab(0xED);
  			outab(v1);
  			break;
  		}
  		if ((t1 == S_R8) && (v1 == A) && (t2 == S_R8X)) {
-+			if (mchtyp == X_8080)
++			if (mchtyp == X_8080 || mchtyp == X_8085)
 +				aerr();
  			outab(0xED);
  			outab(v2|0x10);
  			break;
-@@ -693,6 +712,8 @@
+@@ -642,6 +682,33 @@
+ 				break;
+ 			}
+ 		}
++
++		/* Undocumented 8085 ld (de),hl */
++		if (mchtyp == X_8085 && t1 == S_IDDE && v2 == HL) {
++			outab(0xD9);
++			break;
++		}
++
++		/* Undocumented 8085 ld hl,(de) */
++		if (mchtyp == X_8085 && v1 == HL && t2 == S_IDDE) {
++			outab(0xED);
++			break;
++		}
++
++		/* Undocumented 8085 ld de,{hl,sp}+n */
++		if (mchtyp == X_8085 && t1 == S_R16 && v1 == DE && (v2 == HL || v2 == SP) && more()) {
++			if ((t3 = getnb()) != '+') {
++				unget(t3);
++				break;
++			}
++			if (v2 == HL)
++				outab(0x28);
++			else if (v2 == SP)
++				outab(0x38);
++			expr(&e1, 0);
++			outrb(&e1, 0);
++			break;
++		}
+ 		aerr();
+ 		break;
+ 
+@@ -693,6 +760,8 @@
  				break;
  			}
  			if (t2 == S_IDC) {
-+				if (mchtyp == X_8080)
++				if (mchtyp == X_8080 || mchtyp == X_8085)
 +					aerr();
  				outab(0xED);
  				outab(((rf == S_IN) ? 0x40 : 0x41) + (v1<<3));
  				break;
-@@ -734,6 +755,9 @@
+@@ -734,6 +803,9 @@
  
  	case S_DJNZ:
  	case S_JR:
-+		if (mchtyp == X_8080)
++		if (mchtyp == X_8080 || mchtyp == X_8085)
 +			aerr();
 +		/* fall through */
  		if (rf == S_JR && (v1 = admode(CND)) != 0) {
  			if ((v1 &= 0xFF) <= 0x03) {
  				op += (v1+1)<<3;
-@@ -930,6 +954,8 @@
+@@ -769,8 +841,19 @@
+ 		break;
+ 
+ 	case S_JP:
+-		if ((v1 = admode(CND)) != 0) {
+-			op |= (v1&0xFF)<<3;
++                /*
++                 * jp  cc,mn
++		 * Also handle Undocumented 8085 jp (n)x5,mn
++                 */
++                if ((v1 = admode(CND)) != 0) {
++			v1 &= 0xFF;
++			/* Treat jp (n)x5,mn on non-8085 as jp mn */
++			if (v1 == NX5)
++				op = (mchtyp == X_8085) ? 0xDD : 0xC2;
++			else if (v1 == X5)
++				op = (mchtyp == X_8085) ? 0xFD : 0xC2;
++			else
++				op |= v1<<3;
+ 			comma(1);
+ 			expr(&e1, 0);
+ 			outab(op);
+@@ -930,6 +1013,8 @@
  {
  	int t1;
  
-+	if (pop && mchtyp == X_8080)
++	if (pop && (mchtyp == X_8080 || mchtyp == X_8085))
 +		aerr();
  	if ((t1 = esp->e_mode) == S_R8) {
  		if (pop)
  			outab(pop);
---- z80pst.c.orig	2019-08-14 21:42:45.796828048 +1000
-+++ z80pst.c	2019-08-14 21:44:37.876978674 +1000
-@@ -227,6 +227,7 @@
+--- z80pst.c.orig	2021-01-12 23:15:12.971425032 +1100
++++ z80pst.c	2021-01-13 00:04:55.740985966 +1100
+@@ -227,6 +227,8 @@
      {	NULL,	".z80",		S_CPU,		0,	X_Z80	},
      {	NULL,	".hd64",	S_CPU,		0,	X_HD64	},
      {	NULL,	".z180",	S_CPU,		0,	X_HD64	},
 +    {	NULL,	".8080",	S_CPU,		0,	X_8080	},
++    {	NULL,	".8085",	S_CPU,		0,	X_8085	},
  
  	/* z80 */
  
+@@ -325,5 +327,12 @@
+     {	NULL,	"mlt",		X_MLT,		0,	0x4C	},
+ 
+     {	NULL,	"tst",		X_TST,		0,	0x04	},
+-    {	NULL,	"tstio",	X_TSTIO,	S_EOL,	0x74	}
++    {	NULL,	"tstio",	X_TSTIO,	0,	0x74	},
++
++	/* 8085 */
++    {	NULL,	"rim",		S_INH1,		0,	0x20	},
++    {	NULL,	"sim",		S_INH1,		0,	0x30	},
++	/* Undocumented */
++    {	NULL,	"rstv",		S_INH1,		S_EOL,	0xCB	},
++
+ };
